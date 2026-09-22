@@ -38,12 +38,22 @@ export const App: React.FC<AppProps> = ({
   const { rows } = useTerminalResize();
   const sessionId = useRef(crypto.randomUUID()).current;
 
+  // Manual overrides set explicitly by user via CLI flags or /model and /tier commands
+  const [manualModelOverride, setManualModelOverride] = useState<string | undefined>(
+    initialModel && initialModel !== 'auto' ? initialModel : undefined
+  );
+  const [manualTierOverride, setManualTierOverride] = useState<string | undefined>(
+    initialTier && initialTier !== 'auto' ? initialTier : undefined
+  );
+
+  // Active routed model and tier for the current turn (dynamically updated by JEV on each prompt)
+  const [activeModel, setActiveModel] = useState<string>(initialModel || 'auto');
+  const [activeTier, setActiveTier] = useState<string>(initialTier || 'auto');
+
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
-  const [activeModel, setActiveModel] = useState(initialModel);
-  const [activeTier, setActiveTier] = useState(initialTier);
   const [statusText, setStatusText] = useState('Ready');
   const [sessionCost, setSessionCost] = useState(0.0);
   const [totalTokens, setTotalTokens] = useState(0);
@@ -192,35 +202,6 @@ export const App: React.FC<AppProps> = ({
         ]);
         return;
       }
-      if (cmd === '/key') {
-        const provider = parts[1]?.toLowerCase();
-        const keyVal = parts[2];
-        if (!provider || !keyVal) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: 'system',
-              content: 'Usage: /key <gemini|openai|groq|anthropic> <your-api-key>',
-            },
-          ]);
-          return;
-        }
-        if (provider === 'gemini') process.env.GEMINI_API_KEY = keyVal;
-        if (provider === 'openai') process.env.OPENAI_API_KEY = keyVal;
-        if (provider === 'groq') process.env.GROQ_API_KEY = keyVal;
-        if (provider === 'anthropic') process.env.ANTHROPIC_API_KEY = keyVal;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: 'system',
-            content: `✓ Configured ${provider.toUpperCase()} API key for this session.`,
-          },
-        ]);
-        return;
-      }
       if (cmd === '/help') {
         setMessages((prev) => [
           ...prev,
@@ -228,19 +209,49 @@ export const App: React.FC<AppProps> = ({
             id: crypto.randomUUID(),
             role: 'system',
             content:
-              'Commands:\n  /exit - Quit harness\n  /clear - Clear screen\n  /context - View token headroom\n  /compact - Force context compaction\n  /memory list - View persistent memories\n  /memory add <key> <content> - Add rule/preference\n  /memory del <key> - Delete memory\n  /telemetry - View session cost and token metrics\n  /key <provider> <key> - Set API key (e.g. /key gemini ...)\n  /model <name> - Override model\n  /tier <name> - Override tier\n  /help - Show help',
+              'Commands:\n  /exit - Quit harness\n  /clear - Clear screen\n  /context - View token headroom\n  /compact - Force context compaction\n  /memory list - View persistent memories\n  /memory add <key> <content> - Add rule/preference\n  /memory del <key> - Delete memory\n  /telemetry - View session cost and token metrics\n  /model <name|auto> - Override or reset model\n  /tier <name|auto> - Override or reset tier\n  /help - Show help',
           },
         ]);
         return;
       }
       if (cmd === '/model' && parts[1]) {
-        setActiveModel(parts[1]);
-        setStatusText(`Model set to: ${parts[1]}`);
+        const target = parts[1].toLowerCase();
+        if (target === 'auto' || target === 'reset') {
+          setManualModelOverride(undefined);
+          setStatusText('Model routing reset to dynamic auto (JEV)');
+          setMessages((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), role: 'system', content: '✓ Reset model selection to dynamic auto routing (JEV).' },
+          ]);
+        } else {
+          setManualModelOverride(parts[1]);
+          setActiveModel(parts[1]);
+          setStatusText(`Model locked to: ${parts[1]}`);
+          setMessages((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), role: 'system', content: `✓ Model locked to: ${parts[1]}. Use '/model auto' to re-enable dynamic routing.` },
+          ]);
+        }
         return;
       }
       if (cmd === '/tier' && parts[1]) {
-        setActiveTier(parts[1]);
-        setStatusText(`Tier set to: ${parts[1]}`);
+        const target = parts[1].toLowerCase();
+        if (target === 'auto' || target === 'reset') {
+          setManualTierOverride(undefined);
+          setStatusText('Tier routing reset to dynamic auto (JEV)');
+          setMessages((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), role: 'system', content: '✓ Reset tier selection to dynamic auto routing (JEV).' },
+          ]);
+        } else {
+          setManualTierOverride(parts[1]);
+          setActiveTier(parts[1]);
+          setStatusText(`Tier restricted to: ${parts[1]}`);
+          setMessages((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), role: 'system', content: `✓ Tier restricted to: [${parts[1]}]. Use '/tier auto' to re-enable dynamic routing.` },
+          ]);
+        }
         return;
       }
     }
@@ -253,14 +264,14 @@ export const App: React.FC<AppProps> = ({
     setStreamingContent('');
     setActiveTools([]);
     setWorkStatus('Evaluating prompt with typesafe-ai/jev...');
-    setStatusText('Routing prompt...');
+    setStatusText('Routing prompt with JEV...');
 
     try {
-      // 1. Route the prompt through IModelRouter (typesafe-ai/jev) prioritizing free/low-cost
+      // Route EVERY chat prompt dynamically through JEV (unless explicitly overridden by user command)
       const routeResult = await router.route({
         prompt: promptText,
-        modelOverride: activeModel !== 'auto' ? activeModel : undefined,
-        sessionTierPreference: (activeTier !== 'auto' ? activeTier : undefined) as any,
+        modelOverride: manualModelOverride,
+        sessionTierPreference: manualTierOverride as any,
       });
 
       setActiveModel(routeResult.selectedModel);
@@ -282,7 +293,7 @@ export const App: React.FC<AppProps> = ({
         return;
       }
 
-      // 2. Prepare execution with EveAgentBridge
+      // Prepare execution with EveAgentBridge
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
@@ -315,9 +326,7 @@ export const App: React.FC<AppProps> = ({
             setWorkStatus(`Running tool: ${event.payload.toolName}...`);
             setStatusText(`Tool: ${event.payload.toolName}`);
           } else if (event.type === 'tool_call_finish' && event.payload.toolName) {
-            const runningTool = turnTools.find(
-              (t) => t.name === event.payload.toolName && t.status === 'running'
-            );
+            const runningTool = turnTools.find((t) => t.name === event.payload.toolName && t.status === 'running');
             if (runningTool) {
               runningTool.status = 'completed';
               runningTool.summary = event.payload.summary || 'Done';
