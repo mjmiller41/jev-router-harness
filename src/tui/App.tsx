@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Box, Text, useApp } from 'ink';
 import { PromptInput } from './components/PromptInput.js';
-import { MessageStream, DisplayMessage } from './components/MessageStream.js';
+import { MessageStream, DisplayMessage, ToolCallDisplay } from './components/MessageStream.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useKeybindings } from './hooks/useKeybindings.js';
 import { useTerminalResize } from './hooks/useTerminalResize.js';
@@ -35,7 +35,7 @@ export const App: React.FC<AppProps> = ({
   dryRun = false,
 }) => {
   const { exit } = useApp();
-  const { columns, rows } = useTerminalResize();
+  const { rows } = useTerminalResize();
   const sessionId = useRef(crypto.randomUUID()).current;
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -47,6 +47,8 @@ export const App: React.FC<AppProps> = ({
   const [statusText, setStatusText] = useState('Ready');
   const [sessionCost, setSessionCost] = useState(0.0);
   const [totalTokens, setTotalTokens] = useState(0);
+  const [workStatus, setWorkStatus] = useState<string>('Thinking...');
+  const [activeTools, setActiveTools] = useState<ToolCallDisplay[]>([]);
 
   const contextManagerRef = useRef(
     new ContextManager({ maxTokens: 32000, compactionThreshold: 0.75 })
@@ -59,6 +61,8 @@ export const App: React.FC<AppProps> = ({
       abortControllerRef.current.abort();
       setStatusText('Cancelled by user');
       setIsGenerating(false);
+      setActiveTools([]);
+      setStreamingContent('');
     }
   }, []);
 
@@ -124,18 +128,22 @@ export const App: React.FC<AppProps> = ({
           });
           setMessages((prev) => [
             ...prev,
-            { id: crypto.randomUUID(), role: 'system', content: `Memory saved: "${key}"` },
+            {
+              id: crypto.randomUUID(),
+              role: 'system',
+              content: `Memory saved: [${key}] ${content}`,
+            },
           ]);
           return;
         }
         if (subcmd === 'del' && parts[2]) {
-          const deleted = await defaultMemoryStore.delete(parts[2]);
+          await defaultMemoryStore.delete(parts[2]);
           setMessages((prev) => [
             ...prev,
             {
               id: crypto.randomUUID(),
               role: 'system',
-              content: deleted ? `Memory deleted: "${parts[2]}"` : `Key not found: "${parts[2]}"`,
+              content: `Memory deleted: [${parts[2]}]`,
             },
           ]);
           return;
@@ -184,6 +192,35 @@ export const App: React.FC<AppProps> = ({
         ]);
         return;
       }
+      if (cmd === '/key') {
+        const provider = parts[1]?.toLowerCase();
+        const keyVal = parts[2];
+        if (!provider || !keyVal) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'system',
+              content: 'Usage: /key <gemini|openai|groq|anthropic> <your-api-key>',
+            },
+          ]);
+          return;
+        }
+        if (provider === 'gemini') process.env.GEMINI_API_KEY = keyVal;
+        if (provider === 'openai') process.env.OPENAI_API_KEY = keyVal;
+        if (provider === 'groq') process.env.GROQ_API_KEY = keyVal;
+        if (provider === 'anthropic') process.env.ANTHROPIC_API_KEY = keyVal;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: 'system',
+            content: `✓ Configured ${provider.toUpperCase()} API key for this session.`,
+          },
+        ]);
+        return;
+      }
       if (cmd === '/help') {
         setMessages((prev) => [
           ...prev,
@@ -191,7 +228,7 @@ export const App: React.FC<AppProps> = ({
             id: crypto.randomUUID(),
             role: 'system',
             content:
-              'Commands:\n  /exit - Quit harness\n  /clear - Clear screen\n  /context - View token headroom\n  /compact - Force context compaction\n  /memory list - View persistent memories\n  /memory add <key> <content> - Add rule/preference\n  /memory del <key> - Delete memory\n  /telemetry - View session cost and token metrics\n  /model <name> - Override model\n  /tier <name> - Override tier\n  /help - Show help',
+              'Commands:\n  /exit - Quit harness\n  /clear - Clear screen\n  /context - View token headroom\n  /compact - Force context compaction\n  /memory list - View persistent memories\n  /memory add <key> <content> - Add rule/preference\n  /memory del <key> - Delete memory\n  /telemetry - View session cost and token metrics\n  /key <provider> <key> - Set API key (e.g. /key gemini ...)\n  /model <name> - Override model\n  /tier <name> - Override tier\n  /help - Show help',
           },
         ]);
         return;
@@ -214,10 +251,12 @@ export const App: React.FC<AppProps> = ({
 
     setIsGenerating(true);
     setStreamingContent('');
-    setStatusText('Evaluating prompt...');
+    setActiveTools([]);
+    setWorkStatus('Evaluating prompt with typesafe-ai/jev...');
+    setStatusText('Routing prompt...');
 
     try {
-      // 1. Route the prompt through IModelRouter (typesafe-ai/jev)
+      // 1. Route the prompt through IModelRouter (typesafe-ai/jev) prioritizing free/low-cost
       const routeResult = await router.route({
         prompt: promptText,
         modelOverride: activeModel !== 'auto' ? activeModel : undefined,
@@ -226,7 +265,8 @@ export const App: React.FC<AppProps> = ({
 
       setActiveModel(routeResult.selectedModel);
       setActiveTier(routeResult.selectedTier);
-      setStatusText(`Streaming from ${routeResult.selectedModel}...`);
+      setWorkStatus(`Routing to ${routeResult.selectedModel} [${routeResult.selectedTier}]...`);
+      setStatusText(`Model: ${routeResult.selectedModel} [${routeResult.selectedTier}]`);
 
       if (dryRun) {
         setMessages((prev) => [
@@ -247,6 +287,7 @@ export const App: React.FC<AppProps> = ({
       abortControllerRef.current = abortController;
 
       let accumulatedTokens = '';
+      const turnTools: ToolCallDisplay[] = [];
 
       const memories = await defaultMemoryStore.query();
       const memoryContents = memories.map((m) => m.content);
@@ -261,15 +302,40 @@ export const App: React.FC<AppProps> = ({
           abortSignal: abortController.signal,
         },
         (event) => {
-          if (event.type === 'token_stream' && event.payload.token) {
+          if (event.type === 'tool_call_start' && event.payload.toolName) {
+            const toolId = crypto.randomUUID();
+            const toolEntry: ToolCallDisplay = {
+              id: toolId,
+              name: event.payload.toolName,
+              args: event.payload.toolArgs,
+              status: 'running',
+            };
+            turnTools.push(toolEntry);
+            setActiveTools([...turnTools]);
+            setWorkStatus(`Running tool: ${event.payload.toolName}...`);
+            setStatusText(`Tool: ${event.payload.toolName}`);
+          } else if (event.type === 'tool_call_finish' && event.payload.toolName) {
+            const runningTool = turnTools.find(
+              (t) => t.name === event.payload.toolName && t.status === 'running'
+            );
+            if (runningTool) {
+              runningTool.status = 'completed';
+              runningTool.summary = event.payload.summary || 'Done';
+            }
+            setActiveTools([...turnTools]);
+            setWorkStatus(`Finished tool: ${event.payload.toolName}`);
+          } else if (event.type === 'token_stream' && event.payload.token) {
             accumulatedTokens += event.payload.token;
             setStreamingContent(accumulatedTokens);
+            setWorkStatus('Streaming response...');
+            setStatusText(`Streaming from ${routeResult.selectedModel}...`);
           }
         }
       );
 
       setIsGenerating(false);
       setStreamingContent('');
+      setActiveTools([]);
 
       if (turnResult.completedCleanly) {
         setMessages((prev) => [
@@ -280,6 +346,7 @@ export const App: React.FC<AppProps> = ({
             content: turnResult.fullText,
             model: routeResult.selectedModel,
             tier: routeResult.selectedTier,
+            toolCalls: turnTools.length > 0 ? [...turnTools] : undefined,
           },
         ]);
 
@@ -328,6 +395,7 @@ export const App: React.FC<AppProps> = ({
     } catch (err) {
       setIsGenerating(false);
       setStreamingContent('');
+      setActiveTools([]);
       const errorMsg = err instanceof Error ? err.message : String(err);
       setStatusText(`Error: ${errorMsg}`);
       setMessages((prev) => [
@@ -345,7 +413,7 @@ export const App: React.FC<AppProps> = ({
   }, []);
 
   return (
-    <Box flexDirection="column" paddingX={1} width={columns} minHeight={Math.min(rows, 15)}>
+    <Box flexDirection="column" paddingX={1} minHeight={Math.min(rows || 24, 15)}>
       <Box borderStyle="bold" borderColor="blue" paddingX={1} marginBottom={1}>
         <Text bold color="blueBright">
           ⚡ Jev Router Harness
@@ -358,6 +426,8 @@ export const App: React.FC<AppProps> = ({
         streamingContent={streamingContent}
         activeModel={activeModel}
         isStreaming={isGenerating}
+        activeWorkStatus={workStatus}
+        activeTools={activeTools}
       />
 
       <PromptInput

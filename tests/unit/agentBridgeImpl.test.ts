@@ -61,4 +61,55 @@ describe('EveAgentBridge Implementation', () => {
       execute: async () => ({ status: 'ok' }),
     });
   });
+
+  it('executes tools and analyzes repository on examination prompt', async () => {
+    const bridge = new EveAgentBridge();
+    await bridge.initialize();
+
+    const events: AgentEvent[] = [];
+    const abortController = new AbortController();
+
+    const result = await bridge.executeTurn(
+      {
+        sessionId: 'sess-repo-test',
+        prompt: 'Examin this repo, and tell me what it does',
+        selectedModel: 'gemini-2.5-flash',
+        workingContext: [],
+        persistentMemories: [],
+        abortSignal: abortController.signal,
+      },
+      (e) => events.push(e)
+    );
+
+    expect(result.completedCleanly).toBe(true);
+    expect(result.toolCallsExecuted).toBeGreaterThanOrEqual(2);
+    expect(result.fullText).toContain('Repository Analysis');
+    expect(result.fullText).toContain('jev-router-harness');
+    expect(events.some((e) => e.type === 'tool_call_start')).toBe(true);
+    expect(events.some((e) => e.type === 'tool_call_finish')).toBe(true);
+  });
+
+  it('evaluates mathematical expressions using calculator tool', async () => {
+    const bridge = new EveAgentBridge();
+    await bridge.initialize();
+
+    const events: AgentEvent[] = [];
+    const abortController = new AbortController();
+
+    const result = await bridge.executeTurn(
+      {
+        sessionId: 'sess-calc-test',
+        prompt: 'calculate 25 * 4',
+        selectedModel: 'gemini-2.5-flash',
+        workingContext: [],
+        persistentMemories: [],
+        abortSignal: abortController.signal,
+      },
+      (e) => events.push(e)
+    );
+
+    expect(result.completedCleanly).toBe(true);
+    expect(result.fullText).toContain('100');
+    expect(events.some((e) => e.type === 'tool_call_start' && e.payload.toolName === 'calculator')).toBe(true);
+  });
 });

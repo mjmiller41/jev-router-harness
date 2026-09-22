@@ -22,29 +22,33 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const usagePercent = Math.round(contextUsageRatio * 100);
 
   return (
-    <Box
-      borderStyle="single"
-      borderColor="gray"
-      paddingX={1}
-      flexDirection="row"
-      justifyContent="space-between"
-    >
-      <Box flexDirection="row">
-        <Text bold>Model: </Text>
-        <Text color="cyan">{model} </Text>
-        <Text bold>Tier: </Text>
-        <Text color={tierColor}>[{tier}] </Text>
-        <Text bold>Status: </Text>
-        <Text color="white">{statusText}</Text>
+    <Box borderStyle="single" borderColor="gray" paddingX={1} flexDirection="column">
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row">
+          <Text bold>Model: </Text>
+          <Text color="cyan">{model} </Text>
+          <Text bold>Tier: </Text>
+          <Text color={tierColor}>[{tier}]</Text>
+        </Box>
+
+        <Box flexDirection="row">
+          <Text bold>Tokens: </Text>
+          <Text color="gray">{totalTokens.toLocaleString()} </Text>
+          <Text bold>Cost: </Text>
+          <Text color="green">${sessionCost.toFixed(4)}</Text>
+        </Box>
       </Box>
 
-      <Box flexDirection="row">
-        <Text bold>Context: </Text>
-        <Text color={usagePercent > 70 ? 'yellow' : 'gray'}>{usagePercent}% </Text>
-        <Text bold>Tokens: </Text>
-        <Text color="gray">{totalTokens.toLocaleString()} </Text>
-        <Text bold>Cost: </Text>
-        <Text color="green">${sessionCost.toFixed(4)}</Text>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row" flexGrow={1} marginRight={2}>
+          <Text bold>Status: </Text>
+          <Text color="white">{statusText}</Text>
+        </Box>
+
+        <Box flexDirection="row">
+          <Text bold>Context: </Text>
+          <Text color={usagePercent > 70 ? 'yellow' : 'gray'}>{usagePercent}%</Text>
+        </Box>
       </Box>
     </Box>
   );
