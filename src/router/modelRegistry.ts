@@ -35,16 +35,6 @@ export const DEFAULT_MODEL_CANDIDATES: ModelCandidate[] = [
 
   // Budget Tier
   {
-    id: 'gemini-2.5-flash-paid',
-    name: 'Gemini 2.5 Flash (Paid)',
-    provider: 'google',
-    tier: 'budget',
-    contextWindow: 1048576,
-    costPer1kInputTokensUsd: 0.000075,
-    costPer1kOutputTokensUsd: 0.0003,
-    isAvailable: true,
-  },
-  {
     id: 'gpt-4o-mini',
     name: 'GPT-4o Mini',
     provider: 'openai',
@@ -52,6 +42,16 @@ export const DEFAULT_MODEL_CANDIDATES: ModelCandidate[] = [
     contextWindow: 128000,
     costPer1kInputTokensUsd: 0.00015,
     costPer1kOutputTokensUsd: 0.0006,
+    isAvailable: true,
+  },
+  {
+    id: 'gemini-2.5-flash-paid',
+    name: 'Gemini 2.5 Flash (Paid)',
+    provider: 'google',
+    tier: 'budget',
+    contextWindow: 1048576,
+    costPer1kInputTokensUsd: 0.000075,
+    costPer1kOutputTokensUsd: 0.0003,
     isAvailable: true,
   },
   {

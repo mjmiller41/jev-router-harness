@@ -112,4 +112,54 @@ describe('EveAgentBridge Implementation', () => {
     expect(result.fullText).toContain('100');
     expect(events.some((e) => e.type === 'tool_call_start' && e.payload.toolName === 'calculator')).toBe(true);
   });
+
+  it('responds with pong on ping query', async () => {
+    const bridge = new EveAgentBridge();
+    await bridge.initialize();
+
+    const events: AgentEvent[] = [];
+    const abortController = new AbortController();
+
+    const result = await bridge.executeTurn(
+      {
+        sessionId: 'sess-ping-test',
+        prompt: 'ping',
+        selectedModel: 'gemini-2.5-flash',
+        workingContext: [],
+        persistentMemories: [],
+        abortSignal: abortController.signal,
+      },
+      (e) => events.push(e)
+    );
+
+    expect(result.completedCleanly).toBe(true);
+    expect(result.fullText.toLowerCase()).toContain('pong');
+  });
+
+  it('executes tools and returns audit report for bug scan query', async () => {
+    const bridge = new EveAgentBridge();
+    await bridge.initialize();
+
+    const events: AgentEvent[] = [];
+    const abortController = new AbortController();
+
+    const result = await bridge.executeTurn(
+      {
+        sessionId: 'sess-scan-test',
+        prompt: 'Scan the repo for bugs and improvement opportunities',
+        selectedModel: 'gpt-4o-mini',
+        workingContext: [],
+        persistentMemories: [],
+        abortSignal: abortController.signal,
+      },
+      (e) => events.push(e)
+    );
+
+    expect(result.completedCleanly).toBe(true);
+    expect(result.toolCallsExecuted).toBeGreaterThanOrEqual(3);
+    expect(result.fullText).toContain('Repository Bug Scan & Improvement Opportunities');
+    expect(events.some((e) => e.type === 'tool_call_start' && e.payload.toolName === 'listFiles')).toBe(true);
+    expect(events.some((e) => e.type === 'tool_call_start' && e.payload.toolName === 'searchFiles')).toBe(true);
+    expect(events.some((e) => e.type === 'tool_call_start' && e.payload.toolName === 'runCommand')).toBe(true);
+  });
 });

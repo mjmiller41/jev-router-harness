@@ -72,6 +72,26 @@ describe('Dynamic Model Router', () => {
     expect(fallbackResult.selectedModel).not.toBe('gemini-2.5-flash');
   });
 
+  it('routes ping to free tier with low complexity score', async () => {
+    const result = await heuristicRouter.route({
+      prompt: 'ping',
+    });
+
+    expect(result.selectedTier).toBe('free');
+    expect(result.selectedModel).toBe('gemini-2.5-flash');
+    expect(result.complexityScore).toBeLessThanOrEqual(0.10);
+  });
+
+  it('routes code audit and bug scan requests to budget tier', async () => {
+    const result = await heuristicRouter.route({
+      prompt: 'Scan the repo for bugs and improvement opportunities',
+    });
+
+    expect(result.selectedTier).toBe('budget');
+    expect(result.selectedModel).toBe('gpt-4o-mini');
+    expect(result.complexityScore).toBeGreaterThanOrEqual(0.35);
+  });
+
   it('createRouter factory initializes working router', async () => {
     const router = createRouter({ registry });
     const result = await router.route({ prompt: 'Test factory router' });

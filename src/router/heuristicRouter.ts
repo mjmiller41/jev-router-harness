@@ -106,6 +106,12 @@ export class HeuristicRouter implements IModelRouter {
 
   private calculateComplexity(prompt: string, contextTokens: number): number {
     const text = prompt.toLowerCase();
+
+    // Fast-path for simple conversational greetings and network pings
+    if (/^\s*(ping|pong|hello|hi|hey)\s*$/i.test(prompt)) {
+      return 0.05;
+    }
+
     let score = 0.15; // baseline for simple questions
 
     // Word count & token heuristics
@@ -120,6 +126,7 @@ export class HeuristicRouter implements IModelRouter {
     // High complexity architectural / reasoning markers
     const premiumKeywords = [
       'architect',
+      'architecture',
       'consensus',
       'distributed',
       'proof',
@@ -127,8 +134,10 @@ export class HeuristicRouter implements IModelRouter {
       'formal verification',
       'compiler',
       'concurrency',
+      'race condition',
       'memory leak',
       'vulnerability',
+      'vulnerabilities',
       'cryptographic',
       'zero-knowledge',
     ];
@@ -139,15 +148,28 @@ export class HeuristicRouter implements IModelRouter {
 
     // Medium complexity / budget keywords
     const budgetKeywords = [
+      'scan',
+      'bug',
+      'bugs',
+      'fix',
+      'issues',
+      'audit',
+      'improvement',
+      'improve',
+      'opportunity',
+      'opportunities',
       'refactor',
       'performance',
       'trade-offs',
       'optimize',
+      'optimization',
       'sql query',
       'database schema',
       'unit test',
       'api integration',
       'debug',
+      'code review',
+      'review',
     ];
     const budgetMatches = budgetKeywords.filter((kw) => text.includes(kw)).length;
     if (budgetMatches > 0) {
